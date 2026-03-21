@@ -1,4 +1,21 @@
-ISP hostnamectl set-hostname isp; exec bash mkdir /etc/net/ifaces/enp7s2 enp7s3 echo "TYPE=eth" > /etc/net/ifaces/enp7s2/options echo "BOOTPROTO=static" >> /etc/net/ifaces/enp7s3/options echo "172.16.1.1/28" > /etc/net/ifaces/enp7s2/ipv4address echo "172.16.2.1/28" > /etc/net/ifaces/enp7s3/ipv4address systemctl restart network vim /etc/net/sysctl.conf ➔ net.ipv4.ip_forward = 1 systemctl restart network apt-get update && apt-get install -y iptables iptables –t nat –A POSTROUTING -s 172.16.1.0/28 –o ens19 –j MASQUERADE iptables –t nat –A POSTROUTING -s 172.16.2.0/28 –o ens19 –j MASQUERADE iptables-save >> /etc/sysconfig/iptables systemctl enable --now iptables iptables -t nat -L -n -v apt-get install -y tzdata timedatectl set-timezone Asia/Yekaterinburg 
+ISP hostnamectl set-hostname isp;
+exec bash
+mkdir /etc/net/ifaces/enp7s2 enp7s3
+echo "TYPE=eth" > /etc/net/ifaces/enp7s2/options
+echo "BOOTPROTO=static" >> /etc/net/ifaces/enp7s3/options
+echo "172.16.1.1/28" > /etc/net/ifaces/enp7s2/ipv4address
+echo "172.16.2.1/28" > /etc/net/ifaces/enp7s3/ipv4address 
+systemctl restart network vim /etc/net/sysctl.conf ➔net.ipv4.ip_forward = 1 
+systemctl restart network 
+apt-get update && apt-get install -y iptables 
+
+iptables –t nat –A POSTROUTING -s 172.16.1.0/28 –o ens19 –j MASQUERADE
+iptables –t nat –A POSTROUTING -s 172.16.2.0/28 –o ens19 –j MASQUERADE 
+iptables-save >> /etc/sysconfig/iptables 
+systemctl enable --now iptables
+iptables -t nat -L -n -v
+apt-get install -y tzdata
+timedatectl set-timezone Asia/Yekaterinburg 
 
  
 
@@ -6,13 +23,29 @@ ISP hostnamectl set-hostname isp; exec bash mkdir /etc/net/ifaces/enp7s2 enp7s3 
 
 HQ-SRV 
 
-hostnamectl set-hostname hq-srv.au-team.irpo; exec bash vim /etc/net/ifaces/enp7s1/options → BOOTPROTO=static echo "192.168.100.2/27" > /etc/net/ifaces/enp7s1/ipv4address echo "default via 192.168.100.1" > /etc/net/ifaces/enp7s1/ipv4route echo "nameserver 77.88.8.8" > /etc/net/ifaces/enp7s1/resolv.conf systemctl restart network useradd sshuser –u 2026 passwd sshuser P@ssw0rd usermod -aG wheel sshuser echo "sshuser ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers 
+hostnamectl set-hostname hq-srv.au-team.irpo; exec bash
+vim /etc/net/ifaces/enp7s1/options → BOOTPROTO=static
+echo "192.168.100.2/27" > /etc/net/ifaces/enp7s1/ipv4address 
+echo "default via 192.168.100.1" > /etc/net/ifaces/enp7s1/ipv4route
+echo "nameserver 77.88.8.8" > /etc/net/ifaces/enp7s1/resolv.conf 
+systemctl restart network
+useradd sshuser –u 2026 
+passwd sshuser P@ssw0rd 
+usermod -aG wheel sshuser
+echo "sshuser ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers 
 
  
 
 vim /etc/openssh/sshd_config  → Port = 2026, AllowUsers sshuser, Maxtries = 2, Banner 
 
-/etc/openssh/banner vim /etc/openssh/sshd_config systemctl restart sshd apt-get update && apt-get install bind bind-utils -y vim /var/lib/bind/etc/options.conf  	listen-on { 192.168.100.2; }  	forwarders { 77.88.8.8; }  	allow-query { any; } 
+/etc/openssh/banner 
+vim /etc/openssh/sshd_config
+systemctl restart sshd 
+apt-get update && apt-get install bind bind-utils -y 
+vim /var/lib/bind/etc/options.conf 
+listen-on { 192.168.100.2; }  	
+forwarders { 77.88.8.8; } 
+allow-query { any; } 
 
 vim /var/lib/bind/etc/rfc1912.conf  zone “au-team.irpo”  { 
 
