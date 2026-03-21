@@ -1,0 +1,13 @@
+# 1. Настройка локали
+sudo nano /etc/locale.gen   # раскомментировать ru_RU.UTF-8 UTF-8
+sudo locale-gen
+sudo localectl set-locale LANG=ru_RU.UTF-8
+
+# 2. Настройка консоли
+sudo nano /etc/vconsole.conf # добавить KEYMAP=ru и FONT=cyr-sun16
+
+# 3. Настройка переключения раскладок
+sudo localectl set-x11-keymap us,ru pc105 "" grp:alt_shift_toggle
+
+# 4. Перезагрузка
+sudo reboot
