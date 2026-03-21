@@ -1,0 +1,159 @@
+ISP hostnamectl set-hostname isp; exec bash mkdir /etc/net/ifaces/enp7s2 enp7s3 echo "TYPE=eth" > /etc/net/ifaces/enp7s2/options echo "BOOTPROTO=static" >> /etc/net/ifaces/enp7s3/options echo "172.16.1.1/28" > /etc/net/ifaces/enp7s2/ipv4address echo "172.16.2.1/28" > /etc/net/ifaces/enp7s3/ipv4address systemctl restart network vim /etc/net/sysctl.conf ➔ net.ipv4.ip_forward = 1 systemctl restart network apt-get update && apt-get install -y iptables iptables –t nat –A POSTROUTING -s 172.16.1.0/28 –o ens19 –j MASQUERADE iptables –t nat –A POSTROUTING -s 172.16.2.0/28 –o ens19 –j MASQUERADE iptables-save >> /etc/sysconfig/iptables systemctl enable --now iptables iptables -t nat -L -n -v apt-get install -y tzdata timedatectl set-timezone Asia/Yekaterinburg 
+
+ 
+
+ 
+
+HQ-SRV 
+
+hostnamectl set-hostname hq-srv.au-team.irpo; exec bash vim /etc/net/ifaces/enp7s1/options → BOOTPROTO=static echo "192.168.100.2/27" > /etc/net/ifaces/enp7s1/ipv4address echo "default via 192.168.100.1" > /etc/net/ifaces/enp7s1/ipv4route echo "nameserver 77.88.8.8" > /etc/net/ifaces/enp7s1/resolv.conf systemctl restart network useradd sshuser –u 2026 passwd sshuser P@ssw0rd usermod -aG wheel sshuser echo "sshuser ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers 
+
+ 
+
+vim /etc/openssh/sshd_config  → Port = 2026, AllowUsers sshuser, Maxtries = 2, Banner 
+
+/etc/openssh/banner vim /etc/openssh/sshd_config systemctl restart sshd apt-get update && apt-get install bind bind-utils -y vim /var/lib/bind/etc/options.conf  	listen-on { 192.168.100.2; }  	forwarders { 77.88.8.8; }  	allow-query { any; } 
+
+vim /var/lib/bind/etc/rfc1912.conf  zone “au-team.irpo”  { 
+
+ 	 	type master; 
+
+ 	 	file “au-team.irpo”; 
+
+ 	}; 
+
+ 	zone “100.168.192.in-addr.arpa” { 
+
+ 	 	type master; 
+
+ 	 	file “100.168.192.in-addr.arpa”; 
+
+ 	}; 
+
+ zone “200.168.192.in-addr.arpa” {   type master: 
+
+ 	 	file “200.168.192.in-addr.arpa”; 
+
+ 	}; 
+
+cp /var/lib/bind/etc/zone/empty /var/lib/bind/etc/zone/au-team.irpo cp /var/lib/bind/etc/zone/empty /var/lib/bind/etc/100.168.192.in-addr.arpa cp /var/lib/bind/etc/zone/empty /var/lib/bind/etc/zone/100.168.192.in-addr.arpa vim /var/lib/bind/etc/zone/au-team.irpo 
+
+ 	 	IN 	A 	192.168.100.2 
+
+ 	hq-srv IN 	A 	192.168.100.2 
+
+ 	hq-cli IN 	A 	192.168.200.2 
+
+ 	hq-rtr IN 	A 	192.168.100.1 
+
+ 	hq-rtr IN 	A 	192.168.200.1 
+
+ 	hq-rtr IN 	A 	192.168.99.1 
+
+ 	docker 	IN 	A 	172.16.1.1 
+
+ 	web 	 	IN 	A 	172.16.2.1 
+
+ 	br-srv  	IN 	A 	192.168.0.2 
+
+ 	br-rtr  	IN 	A 	192.168.0.1 
+
+vim /var/lib/bind/etc/zone/100.168.192.in-addr.arpa 
+
+ 	1 	IN 	PTR 	hq-rtr.au-team.irpo.  	2 	IN 	PTR 	hq-srv.au-team.irpo. 
+
+vim /var/lib/bind/etc/zone/200.168.192.in-addr.arpa 
+
+ 	1 	IN 	PTR 	hq-rtr.au-team.irpo.  	2 	IN 	PTR 	hq-cli.au-team.irpo. 
+
+named-checkconf rndc-confgen > /var/lib/bind/etc/rndc.key sed -i ‘6,$d’ /var/lib/bind/etc/rndc.key named-checkconf chown -R root:named /etc/bind/zone/* ls -l /etc/bind/zone/ named-checkconf -z systemctl enable --now bind.service systemctl status bind.service vim /etc/resolv.conf → search au-team.irpo, nameserver 192.168.100.2 timedatectl set-timezone Asia/Yekaterinburg 
+
+ 
+
+ 
+
+BR-SRV hostnamectl set-hostname br-srv.au-team.irpo; exec bash vim /etc/net/ifaces/enp7s1/options → BOOTPROTO=static echo "192.168.0.2/28" > /etc/net/ifaces/enp7s1/ipv4address echo "default via 192.168.0.1" > /etc/net/ifaces/enp7s1/ipv4route echo "nameserver 77.88.8.8" > /etc/net/ifaces/enp7s1/resolv.conf systemctl restart network useradd sshuser –u 2026 passwd sshuser P@ssw0rd 
+
+usermod -aG wheel sshuser echo "sshuser ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers 
+
+ 
+
+vim /etc/openssh/sshd_config  → Port = 2026, AllowUsers sshuser, Maxtries = 2, Banner 
+
+/etc/openssh/banner vim /etc/openssh/sshd_config systemctl restart sshd timedatectl set-timezone Asia/Yekaterinburg 
+
+ 
+
+ 
+
+HQ-RTR enable conf t hostname hq-rtr ip domain-name au-team.irpo write memory interface vl100 description "VLAN 100" ip address 192.168.100.1/27 interface vl200 description "VLAN 200" ip address 192.168.200.1/24 interface vl999 description "VLAN 999" ip address 192.168.99.1/29 
+
+exit 
+
+write memory port te1 service-instance te1/vl100 encapsulation dot1q 100 exact                   rewrite pop 1 connect ip interface vl100  
+
+ 
+
+exit service-instance te1/vl200 encapsulation dot1q 200 exact  rewrite pop 1 connect ip interface vl200  exit service-instance te1/vl999 encapsulation dot1q 999 exact  rewrite pop 1 connect ip interface vl999  exit 
+
+write memory interface isp 
+
+description "ISP"                    
+
+ip address 172.16.1.2/28 
+
+exit ip route 0.0.0.0/0 172.16.1.1 port te0 service-instance te0/isp encapsulation untagged  connect ip interface isp  exit 
+
+write memory username net_admin password P@ssw0rd role admin  exit 
+
+write memory interface tunnel.0 description "GRE" ip address 10.10.10.1/30 ip tunnel 172.16.1.2 172.16.2.2 mode gre exit 
+
+write memory router ospf 1 ospf router-id 10.10.10.1 passive-interface default  no passive-interface tunnel.0  network 10.10.10.0/30 area 0 network 192.168.100.0/27 area 0 network 192.168.200.0/24 area 0 network 192.168.99.0/29 area 0 
+
+exit interface tunnel.0 ip ospf authentication message-digest  ip ospf message-digest-key 1 md5 P@ssw0rd exit 
+
+write memory interface isp  ip nat outside  interface vl100  ip nat inside  interface vl200 ip nat inside  interface vl999  ip nat inside  exit 
+
+ip nat pool VLAN100 192.168.100.1-192.168.100.30 ip nat pool VLAN200 192.168.200.1-192.168.200.254 ip nat pool VLAN999 192.168.99.1-192.168.99.6 ip nat source dynamic inside-to-outside pool VLAN100 overload interface isp  ip nat source dynamic inside-to-outside pool VLAN200 overload interface isp  ip nat source dynamic inside-to-outside pool VLAN999 overload interface isp  write memory ip pool VLAN200 range 192.168.200.2-192.168.200.254   dhcp-server 1 pool VLAN200 1 mask 24 gateway 192.168.200.1 dns 192.168.100.2 
+
+domain-name au-team.irpo interface vl200  dhcp-server 1 
+
+exit 
+
+write memory ntp timezone utc+5 write memory 
+
+ 
+
+BR-RTR en cof hostname br-rtr ip domain-name au-team.irpo write memory interface int1 description "BR-Net" 
+
+ip address 192.168.0.1/28                  exit port te1 service-instance te1/int1 encapsulation untagged  connect ip interface int1  
+
+ 
+
+exit 
+
+write memory interface isp description "ISP" ip address 172.16.2.2/28 
+
+exit ip route 0.0.0.0/0 172.16.2.1 port te0 service-instance te0/isp encapsulation untagged  connect ip interface isp  exit 
+
+write memory username net_admin password P@ssw0rd role admin  exit 
+
+write memory interface tunnel.0 description "GRE" ip address 10.10.10.2/30 ip tunnel 172.16.2.2 172.16.1.2 mode gre  exit 
+
+write memory router ospf 1 ospf router-id 10.10.10.2 passive-interface default  no passive-interface tunnel.0  network 192.168.0.0/28 area 0 network 10.10.10.0/30 area 0 
+
+exit interface tunnel.0 ip ospf authentication message-digest  ip ospf message-digest-key 1 md5 P@ssw0rd exit 
+
+write memory interface isp  ip nat outside  interface int1  ip nat inside  exit 
+
+ip nat pool BR-Net 192.168.0.1-192.168.0.14 ip nat source dynamic inside-to-outside pool BR-Net overload interface isp                  exit 
+
+write memory  ntp timezone utc+5 write memory 
+
+ 
+
+ 
+
+HQ-CLI hostnamectl set-hostname hq-cli.au-team.irpo; exec bash ping -c3 ya.ru host …… timedatectl set-timezone Asia/Yekaterinburg 
+
+
