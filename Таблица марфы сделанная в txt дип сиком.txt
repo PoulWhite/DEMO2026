@@ -1,0 +1,503 @@
+================================================================================
+        МОДУЛЬ 1: АНАЛИЗ КОНФИГУРАЦИИ И ИСПРАВЛЕНИЕ ОШИБОК (КОД 2026)
+        Файл: diagnostika_modul1.txt
+================================================================================
+
+Данный файл содержит:
+1. Диагностику вашей текущей конфигурации
+2. Исправленные команды для EcoRouter и Альт Linux
+3. Пошаговую последовательность для проверки работоспособности
+
+================================================================================
+ЧАСТЬ 1: ДИАГНОСТИКА — ЧТО НЕ ТАК?
+================================================================================
+
+| Проблема | Описание | Как исправить |
+|----------|----------|---------------|
+| 1. IP-адресация VLAN 200 | Используется /24 вместо компактной /28 | Не критично, но лучше использовать /28 для экономии адресов |
+| 2. EcoRouter VLAN config | Команда rewrite pop 1 может работать только с untagged клиентами | Проверить, что HQ-SRV получает untagged трафик |
+| 3. NAT синтаксис | ip nat source dynamic inside-to-outside — НЕВЕРНАЯ КОМАНДА | Использовать ip nat inside source list ... interface isp overload |
+| 4. OSPF passive-interface | Настроено правильно, но могут не подняться соседи | Проверить туннель и аутентификацию |
+| 5. DNS A-записи | Для hq-rtp три A-записи с разными IP — НЕПРАВИЛЬНО | Оставить одну A-запись для основного IP |
+| 6. Часовой пояс | EcoRouter: utc+5, Linux: Asia/Yekaterinburg — не совпадают | Привести к единому (Europe/Moscow, если экзамен в Москве) |
+
+================================================================================
+ЧАСТЬ 2: ИСПРАВЛЕННЫЕ КОМАНДЫ ДЛЯ ECOROUTER
+================================================================================
+
+2.1 HQ-RTR — базовая настройка
+--------------------------------------------------------------------------------
+enable
+configure terminal
+
+hostname hq-rtr
+ip domain-name au-team.irpo
+
+# Интерфейсы VLAN
+interface vl100
+ description "VLAN 100 - HQ-SRV"
+ ip address 192.168.100.1/27
+ exit
+
+interface vl200
+ description "VLAN 200 - HQ-CLI"
+ ip address 192.168.200.1/28
+ exit
+
+interface vl999
+ description "VLAN 999 - Management"
+ ip address 192.168.99.1/29
+ exit
+
+# Порт te1 — подключение к HQ-SRV и HQ-CLI (trunk)
+port te1
+ service-instance te1/vl100
+  encapsulation dot1q 100
+  connect ip interface vl100
+  exit
+ service-instance te1/vl200
+  encapsulation dot1q 200
+  connect ip interface vl200
+  exit
+ service-instance te1/vl999
+  encapsulation dot1q 999
+  connect ip interface vl999
+  exit
+ exit
+
+# Интерфейс к ISP
+interface isp
+ description "Connection to ISP"
+ ip address 172.16.1.2/28
+ exit
+
+port te0
+ service-instance te0/isp
+  encapsulation untagged
+  connect ip interface isp
+  exit
+ exit
+
+ip route 0.0.0.0/0 172.16.1.1
+
+write memory
+
+2.2 BR-RTR — базовая настройка
+--------------------------------------------------------------------------------
+enable
+configure terminal
+
+hostname br-rtr
+ip domain-name au-team.irpo
+
+# Интерфейс к BR-SRV
+interface int1
+ description "BR-SRV Network"
+ ip address 192.168.0.1/28
+ exit
+
+port te1
+ service-instance te1/int1
+  encapsulation untagged
+  connect ip interface int1
+  exit
+ exit
+
+# Интерфейс к ISP
+interface isp
+ description "Connection to ISP"
+ ip address 172.16.2.2/28
+ exit
+
+port te0
+ service-instance te0/isp
+  encapsulation untagged
+  connect ip interface isp
+  exit
+ exit
+
+ip route 0.0.0.0/0 172.16.2.1
+
+write memory
+
+2.3 GRE ТУННЕЛЬ (на обоих маршрутизаторах)
+--------------------------------------------------------------------------------
+# HQ-RTR
+interface tunnel.0
+ description "GRE Tunnel to BR-RTR"
+ ip address 10.10.10.1/30
+ ip tunnel 172.16.1.2 172.16.2.2 mode gre
+ exit
+
+# BR-RTR
+interface tunnel.0
+ description "GRE Tunnel to HQ-RTR"
+ ip address 10.10.10.2/30
+ ip tunnel 172.16.2.2 172.16.1.2 mode gre
+ exit
+
+# Проверка
+# На HQ-RTR: ping 10.10.10.2
+# На BR-RTR: ping 10.10.10.1
+
+2.4 OSPF (исправленный)
+--------------------------------------------------------------------------------
+# HQ-RTR
+router ospf 1
+ ospf router-id 10.10.10.1
+ passive-interface default
+ no passive-interface tunnel.0
+ network 10.10.10.0/30 area 0
+ network 192.168.100.0/27 area 0
+ network 192.168.200.0/28 area 0
+ network 192.168.99.0/29 area 0
+ exit
+
+interface tunnel.0
+ ip ospf authentication message-digest
+ ip ospf message-digest-key 1 md5 P@ssw0rd
+ exit
+
+# BR-RTR
+router ospf 1
+ ospf router-id 10.10.10.2
+ passive-interface default
+ no passive-interface tunnel.0
+ network 10.10.10.0/30 area 0
+ network 192.168.0.0/28 area 0
+ exit
+
+interface tunnel.0
+ ip ospf authentication message-digest
+ ip ospf message-digest-key 1 md5 P@ssw0rd
+ exit
+
+2.5 NAT (ИСПРАВЛЕННЫЙ)
+--------------------------------------------------------------------------------
+# HQ-RTR
+configure terminal
+# Создаем ACL для разрешенных сетей
+access-list 1 permit 192.168.100.0 0.0.0.31
+access-list 1 permit 192.168.200.0 0.0.0.15
+access-list 1 permit 192.168.99.0 0.0.0.7
+
+# Настраиваем NAT
+interface isp
+ ip nat outside
+ exit
+
+interface vl100
+ ip nat inside
+ exit
+
+interface vl200
+ ip nat inside
+ exit
+
+interface vl999
+ ip nat inside
+ exit
+
+ip nat inside source list 1 interface isp overload
+write memory
+
+# BR-RTR
+configure terminal
+access-list 1 permit 192.168.0.0 0.0.0.15
+
+interface isp
+ ip nat outside
+ exit
+
+interface int1
+ ip nat inside
+ exit
+
+ip nat inside source list 1 interface isp overload
+write memory
+
+2.6 DHCP (на HQ-RTR)
+--------------------------------------------------------------------------------
+configure terminal
+# Создаем пул адресов
+ip pool VLAN200 1
+ range 192.168.200.2 192.168.200.14
+ exit
+
+# Настраиваем DHCP-сервер
+dhcp-server 1
+ pool VLAN200 1
+ mask 28
+ gateway 192.168.200.1
+ dns 192.168.100.2
+ domain-name au-team.irpo
+ exit
+
+# Привязываем к интерфейсу
+interface vl200
+ dhcp-server 1
+ exit
+
+write memory
+
+2.7 Часовой пояс (EcoRouter)
+--------------------------------------------------------------------------------
+# Для Екатеринбурга (UTC+5)
+ntp timezone utc+5
+write memory
+
+# Для Москвы (UTC+3) — если экзамен в Москве
+ntp timezone utc+3
+
+================================================================================
+ЧАСТЬ 3: ИСПРАВЛЕННЫЕ КОМАНДЫ ДЛЯ АЛЬТ LINUX
+================================================================================
+
+3.1 HQ-SRV / BR-SRV — настройка IP
+--------------------------------------------------------------------------------
+# HQ-SRV
+echo "192.168.100.2/27" > /etc/net/ifaces/enp7s1/ipv4address
+echo "default via 192.168.100.1" > /etc/net/ifaces/enp7s1/ipv4route
+echo "nameserver 192.168.100.2" > /etc/net/ifaces/enp7s1/resolv.conf
+systemctl restart network
+
+# BR-SRV
+echo "192.168.0.2/28" > /etc/net/ifaces/enp7s1/ipv4address
+echo "default via 192.168.0.1" > /etc/net/ifaces/enp7s1/ipv4route
+echo "nameserver 192.168.100.2" > /etc/net/ifaces/enp7s1/resolv.conf
+systemctl restart network
+
+3.2 Пользователи (HQ-SRV и BR-SRV)
+--------------------------------------------------------------------------------
+# Создаем пользователя sshuser
+useradd -m -u 2026 sshuser
+passwd sshuser
+# Пароль: P@ssw0rd
+
+# Даем sudo без пароля
+echo "sshuser ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+3.3 SSH (HQ-SRV и BR-SRV)
+--------------------------------------------------------------------------------
+vim /etc/openssh/sshd_config
+
+# Вносим изменения:
+Port 2026
+AllowUsers sshuser
+MaxAuthTries 2
+Banner /etc/openssh/banner
+
+# Создаем баннер
+echo "Authorized access only" > /etc/openssh/banner
+
+# Перезапускаем SSH
+systemctl restart sshd
+
+3.4 DNS-сервер (HQ-SRV) — ИСПРАВЛЕННЫЙ
+--------------------------------------------------------------------------------
+# Установка
+apt-get update
+apt-get install bind bind-utils -y
+
+# Редактируем /var/lib/bind/etc/options.conf
+vim /var/lib/bind/etc/options.conf
+
+# Содержимое:
+listen-on { 192.168.100.2; };
+forwarders { 77.88.8.8; 77.88.8.3; };
+allow-query { any; };
+recursion yes;
+
+# Редактируем /var/lib/bind/etc/rfc1912.conf
+vim /var/lib/bind/etc/rfc1912.conf
+
+# Добавляем зоны:
+zone "au-team.irpo" {
+    type master;
+    file "au-team.irpo";
+};
+
+zone "100.168.192.in-addr.arpa" {
+    type master;
+    file "100.168.192.in-addr.arpa";
+};
+
+zone "0.168.192.in-addr.arpa" {
+    type master;
+    file "0.168.192.in-addr.arpa";
+};
+
+# Создаем файлы зон
+cp /var/lib/bind/etc/zone-empty /var/lib/bind/etc/zone/au-team.irpo
+cp /var/lib/bind/etc/zone-empty /var/lib/bind/etc/zone/100.168.192.in-addr.arpa
+cp /var/lib/bind/etc/zone-empty /var/lib/bind/etc/zone/0.168.192.in-addr.arpa
+
+# Прямая зона au-team.irpo
+vim /var/lib/bind/etc/zone/au-team.irpo
+
+# Содержимое (ИСПРАВЛЕННОЕ — без дублей):
+$TTL 86400
+@   IN  SOA hq-srv.au-team.irpo. admin.au-team.irpo. (
+    2026032101 ; serial
+    3600       ; refresh
+    1800       ; retry
+    604800     ; expire
+    86400      ; minimum
+)
+@   IN  NS  hq-srv.au-team.irpo.
+
+hq-srv  IN  A   192.168.100.2
+hq-rtr  IN  A   192.168.100.1
+hq-cli  IN  A   192.168.200.2
+br-srv  IN  A   192.168.0.2
+br-rtr  IN  A   192.168.0.1
+docker  IN  A   172.16.1.1
+web     IN  A   172.16.2.1
+
+# Обратная зона для HQ (100.168.192.in-addr.arpa)
+vim /var/lib/bind/etc/zone/100.168.192.in-addr.arpa
+
+$TTL 86400
+@   IN  SOA hq-srv.au-team.irpo. admin.au-team.irpo. (
+    2026032101 ; serial
+    3600       ; refresh
+    1800       ; retry
+    604800     ; expire
+    86400      ; minimum
+)
+@   IN  NS  hq-srv.au-team.irpo.
+
+1   IN  PTR hq-rtr.au-team.irpo.
+2   IN  PTR hq-srv.au-team.irpo.
+
+# Обратная зона для BR (0.168.192.in-addr.arpa)
+vim /var/lib/bind/etc/zone/0.168.192.in-addr.arpa
+
+$TTL 86400
+@   IN  SOA hq-srv.au-team.irpo. admin.au-team.irpo. (
+    2026032101 ; serial
+    3600       ; refresh
+    1800       ; retry
+    604800     ; expire
+    86400      ; minimum
+)
+@   IN  NS  hq-srv.au-team.irpo.
+
+1   IN  PTR br-rtr.au-team.irpo.
+2   IN  PTR br-srv.au-team.irpo.
+
+# Запускаем DNS
+systemctl enable --now bind.service
+systemctl status bind.service
+
+3.5 Часовой пояс (Альт Linux)
+--------------------------------------------------------------------------------
+timedatectl set-timezone Asia/Yekaterinburg
+# или для Москвы:
+timedatectl set-timezone Europe/Moscow
+
+3.6 HQ-CLI — настройка
+--------------------------------------------------------------------------------
+# Имя хоста
+hostnamectl set-hostname hq-cli.au-team.irpo
+
+# Получение IP по DHCP (после настройки DHCP-сервера)
+dhclient enp7s1
+
+# Проверка
+ip addr show
+
+================================================================================
+ЧАСТЬ 4: ПОШАГОВАЯ ПРОВЕРКА РАБОТОСПОСОБНОСТИ
+================================================================================
+
+Выполняем команды в указанном порядке и фиксируем результат:
+
+4.1 Проверка IP-связности
+--------------------------------------------------------------------------------
+# На HQ-RTR
+ping 172.16.1.1        # должен пинговаться ISP
+ping 10.10.10.2        # должен пинговаться BR-RTR через туннель
+ping 192.168.100.2     # должен пинговаться HQ-SRV
+ping 192.168.200.2     # должен пинговаться HQ-CLI (после получения IP)
+
+# На BR-RTR
+ping 172.16.2.1        # должен пинговаться ISP
+ping 10.10.10.1        # должен пинговаться HQ-RTR через туннель
+ping 192.168.0.2       # должен пинговаться BR-SRV
+
+# На HQ-SRV
+ping 192.168.100.1     # шлюз
+ping 192.168.200.1     # шлюз VLAN200
+ping 8.8.8.8           # интернет (должен работать после NAT)
+
+4.2 Проверка OSPF
+--------------------------------------------------------------------------------
+# На HQ-RTR
+show ip ospf neighbor
+# Должен показывать соседа 10.10.10.2 в состоянии FULL
+
+show ip route ospf
+# Должен показывать маршрут до 192.168.0.0/28
+
+# На BR-RTR
+show ip ospf neighbor
+# Должен показывать соседа 10.10.10.1
+
+show ip route ospf
+# Должен показывать маршруты до 192.168.100.0/27, 192.168.200.0/28, 192.168.99.0/29
+
+4.3 Проверка NAT
+--------------------------------------------------------------------------------
+# На HQ-CLI или HQ-SRV
+ping -c 3 8.8.8.8
+# Если пинг идет — NAT работает
+
+# На HQ-RTR можно посмотреть трансляции:
+show ip nat translations
+
+4.4 Проверка DHCP
+--------------------------------------------------------------------------------
+# На HQ-CLI
+ip addr show enp7s1
+# Должен быть IP из диапазона 192.168.200.2-192.168.200.14
+
+# Проверка шлюза
+ip route show default
+
+4.5 Проверка DNS
+--------------------------------------------------------------------------------
+# На HQ-SRV
+nslookup hq-rtr.au-team.irpo 127.0.0.1
+# Должен вернуть 192.168.100.1
+
+nslookup 192.168.100.1 127.0.0.1
+# Должен вернуть hq-rtr.au-team.irpo
+
+nslookup docker.au-team.irpo 127.0.0.1
+# Должен вернуть 172.16.1.1
+
+# На HQ-CLI
+nslookup hq-srv.au-team.irpo
+# Должен вернуть 192.168.100.2
+
+================================================================================
+ЧАСТЬ 5: БЫСТРЫЙ ЧЕК-ЛИСТ
+================================================================================
+
+Перед тем как сказать "не работает", проверьте:
+
+[ ] 1. Все интерфейсы подняты (show ip interface brief)
+[ ] 2. Пинг до ISP (172.16.1.1 и 172.16.2.1) проходит
+[ ] 3. Туннель поднят (ping 10.10.10.2)
+[ ] 4. OSPF сосед в состоянии FULL
+[ ] 5. В таблице маршрутизации есть сети другого офиса
+[ ] 6. NAT настроен (show ip nat translations)
+[ ] 7. Пинг до 8.8.8.8 проходит с HQ-SRV и BR-SRV
+[ ] 8. DHCP выдал IP на HQ-CLI
+[ ] 9. DNS резолвит локальные имена
+[ ] 10. Часовой пояс одинаков на всех устройствах
+
+================================================================================
+КОНЕЦ ДИАГНОСТИКИ
+================================================================================
