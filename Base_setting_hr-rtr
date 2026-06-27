@@ -1,0 +1,45 @@
+enable
+configure terminal
+hostname hq-rtr
+ip domain-name au-team.irpo
+
+# VLAN интерфейсы
+interface vl100
+ ip address 192.168.100.1/27
+ exit
+interface vl200
+ ip address 192.168.200.1/28
+ exit
+interface vl999
+ ip address 192.168.99.1/29
+ exit
+
+# Порт te1 (trunk к HQ-SRV/HQ-CLI)
+port te1
+ service-instance te1/vl100
+  encapsulation dot1q 100
+  connect ip interface vl100
+  exit
+ service-instance te1/vl200
+  encapsulation dot1q 200
+  connect ip interface vl200
+  exit
+ service-instance te1/vl999
+  encapsulation dot1q 999
+  connect ip interface vl999
+  exit
+ exit
+
+# Интерфейс к ISP
+interface isp
+ ip address 172.16.1.2/28
+ exit
+port te0
+ service-instance te0/isp
+  encapsulation untagged
+  connect ip interface isp
+  exit
+ exit
+
+ip route 0.0.0.0/0 172.16.1.1
+write memory
