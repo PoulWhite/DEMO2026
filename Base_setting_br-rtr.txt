@@ -1,0 +1,29 @@
+enable
+configure terminal
+hostname br-rtr
+ip domain-name au-team.irpo
+
+# Интерфейс к BR-SRV
+interface int1
+ ip address 192.168.0.1/28
+ exit
+port te1
+ service-instance te1/int1
+  encapsulation untagged
+  connect ip interface int1
+  exit
+ exit
+
+# Интерфейс к ISP
+interface isp
+ ip address 172.16.2.2/28
+ exit
+port te0
+ service-instance te0/isp
+  encapsulation untagged
+  connect ip interface isp
+  exit
+ exit
+
+ip route 0.0.0.0/0 172.16.2.1
+write memory
