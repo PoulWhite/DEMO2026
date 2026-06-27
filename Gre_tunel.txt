@@ -1,0 +1,17 @@
+# === НА HQ-RTR ===
+interface tunnel.0
+ description "GRE Tunnel to BR-RTR"
+ ip address 10.10.10.1/30
+ ip tunnel 172.16.1.2 172.16.2.2 mode gre
+ exit
+
+# === НА BR-RTR ===
+interface tunnel.0
+ description "GRE Tunnel to HQ-RTR"
+ ip address 10.10.10.2/30
+ ip tunnel 172.16.2.2 172.16.1.2 mode gre
+ exit
+
+# === ПРОВЕРКА ===
+# HQ: ping 10.10.10.2
+# BR: ping 10.10.10.1 
