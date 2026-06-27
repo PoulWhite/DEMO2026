@@ -1,0 +1,31 @@
+# === HQ-RTR ===
+access-list 1 permit 192.168.100.0 0.0.0.31
+access-list 1 permit 192.168.200.0 0.0.0.15
+access-list 1 permit 192.168.99.0 0.0.0.7
+
+interface isp
+ ip nat outside
+ exit
+interface vl100
+ ip nat inside
+ exit
+interface vl200
+ ip nat inside
+ exit
+interface vl999
+ ip nat inside
+ exit
+
+ip nat inside source list 1 interface isp overload
+write memory
+
+# === BR-RTR ===
+access-list 1 permit 192.168.0.0 0.0.0.15
+interface isp
+ ip nat outside
+ exit
+interface int1
+ ip nat inside
+ exit
+ip nat inside source list 1 interface isp overload
+write memory
